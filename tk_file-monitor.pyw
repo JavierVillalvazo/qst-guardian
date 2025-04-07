@@ -5,7 +5,6 @@ import threading
 import time
 import os
 import pystray
-from file_parsing import * 
 from PIL import Image
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -20,7 +19,7 @@ class FileMonitor(FileSystemEventHandler):
             self.log_callback(f"file(s) detected: {os.path.basename(event.src_path)}")
 
 # Aplicación principal
-class App(ctk.CTk):
+class App(tk.Tk):
     def __init__(self):
         super().__init__()
         
@@ -32,7 +31,7 @@ class App(ctk.CTk):
         self.attributes("-topmost", True)  # Mantener la ventana en la parte superior
         self.resizable(False, False)  # Deshabilitar redimensionamiento
         
-        main_frame = ctk.CTkFrame(self)
+        main_frame = tk.Frame(self)
         main_frame.pack(fill="both", expand=True, padx=5, pady=5)
         
         # Área de logs
@@ -40,15 +39,10 @@ class App(ctk.CTk):
         self.log_area.pack(expand=True, fill='both')
         
         #Contention button
-        button = ctk.CTkFrame(main_frame)
+        button = tk.Frame(main_frame)
         button.pack(padx=5, pady=5)
 
-        self.button = ctk.CTkButton(
-            button, text="Contention",
-            font=("Arial", 14),
-            height=25, width=100,
-            fg_color="red",
-            hover_color="darkred",
+        self.button = tk.Button( text="STOP", height=25, width=100, 
             command=self.stop_service
         )
         self.button.pack(side="left", padx=5)
@@ -121,7 +115,7 @@ class App(ctk.CTk):
             target=self.tray_icon.run,
             daemon=True
         ).start()
-
+        
     def show_app(self):
         self.deiconify()
         self.update()

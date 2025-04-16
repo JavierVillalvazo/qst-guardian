@@ -20,5 +20,5 @@ def get_connection():
         f"PWD={password}"
     )
     return pyodbc.connect(con_str)
-print("Database connection string loaded successfully.")
-print(f"Server: {server}, Database: {database}, Username: {username}")
+# print("Database connection string loaded successfully.")
+# print(f"Server: {server}, Database: {database}, Username: {username}")

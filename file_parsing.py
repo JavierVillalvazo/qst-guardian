@@ -2,7 +2,7 @@ import re
 from database import get_connection
 from datetime import datetime
 
-def parse_qst(file_path):
+def parse_qst(file_path, log_callback):
     current_test_id = None
     conn = get_connection()
     cursor = conn.cursor()

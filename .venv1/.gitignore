@@ -1,0 +1,33 @@
+# 🐍 Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.log
+
+# 📦 Virtual Environments
+.venv/
+env/
+venv/
+ENV/
+
+# 🔐 Secrets
+.env
+*.env
+
+# 🧪 Testing
+.coverage
+htmlcov/
+.tox/
+
+# 📦 Packaging
+*.egg-info/
+dist/
+build/
+
+# ⚙️ VSCode
+.vscode/
+
+# 💾 Databases
+*.sqlite3
+*.db

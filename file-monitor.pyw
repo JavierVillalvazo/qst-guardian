@@ -1,6 +1,6 @@
 import tkinter as tk
 import customtkinter as ctk
-from tkinter import scrolledtext
+from tkinter import scrolledtext, messagebox
 import threading
 import time
 import os
@@ -14,23 +14,33 @@ from watchdog.events import FileSystemEventHandler
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("dark-blue")
 
+ERROR_FOLDER = "C:/reports/local_qst/errores/"
+
 
 class FileMonitor(FileSystemEventHandler):
-    def __init__(self, log_callback, is_paused):
+    def __init__(self, log_callback, is_paused, show_error_dialog):
         self.log_callback = log_callback
         self.is_paused = is_paused
+        self.show_error_dialog = show_error_dialog
+    
+    def show_error_dialog(self, filename, error_folder):
+        messagebox.showerror(
+        "Error al procesar archivo",
+        f"El archivo '{filename}' no pudo ser procesado y fue movido a:\n{error_folder}"
+        )
         
 
     def on_created(self, event):
         if not event.is_directory and event.src_path.endswith(".QST"):
             file_path = event.src_path
-            self.log_callback(f"Archivo detectado: {os.path.basename(file_path)}")
-            try:
-                parse_qst(file_path) 
-                # Error: mostró como archivo procesado correctamente cuando mostroba error al procesar
-                #self.log_callback(f"Procesado correctamente: {os.path.basename(file_path)}")
-            except Exception as e:
-                self.log_callback(f"Error al procesar {os.path.basename(file_path)}: {str(e)}")
+            if ERROR_FOLDER not in file_path: # Ignora los archivos que ya están en la carpeta de errores
+                #self.log_callback(f"Archivo detectado: {os.path.basename(file_path)}")
+                try:
+                    parse_qst(file_path, self.log_callback, self.show_error_dialog) 
+                    # Error: mostró como archivo procesado correctamente cuando mostroba error al procesar
+                    #self.log_callback(f"Procesado correctamente: {os.path.basename(file_path)}")
+                except Exception as e:
+                    self.log_callback(f"Error inesperado al procesar {os.path.basename(file_path)}: {str(e)}")
 
 
 class App(ctk.CTk):
@@ -63,6 +73,12 @@ class App(ctk.CTk):
         self.create_ui()
         self.setup_tray_icon()
         self.start_monitoring()
+    
+    def show_error_dialog(self, filename, error_folder):
+        messagebox.showerror(
+        "Error al procesar archivo",
+        f"El archivo '{filename}' no pudo ser procesado y fue movido a:\n{error_folder}"
+        )  
 
     def create_ui(self):
         self.main_frame = ctk.CTkFrame(self, corner_radius=10)
@@ -164,8 +180,20 @@ class App(ctk.CTk):
 
     def log_message(self, message):
         timestamp = time.strftime("%H:%M:%S", time.localtime())
+        formatted_message = f"[{timestamp}] {message}\n"
         self.log_area.configure(state='normal')
-        self.log_area.insert(tk.END, f"[{timestamp}] {message}\n")
+        if "PASS" in message:
+            self.log_area.insert(tk.END, formatted_message, "pass_color")
+            self.log_area.tag_config("pass_color", foreground="#4CAF50") 
+        elif "FAIL" in message or "ERROR" in message or "Advertencia" in message:
+            self.log_area.insert(tk.END, formatted_message, "fail_color")
+            self.log_area.tag_config("fail_color", foreground="#F44336") 
+        elif "MOVIDO" in message:
+            self.log_area.insert(tk.END, formatted_message, "moved_color")
+            self.log_area.tag_config("moved_color", foreground="#FFA500")
+        else:
+            self.log_area.insert(tk.END, formatted_message) # Color por defecto        
+        #self.log_area.insert(tk.END, f"[{timestamp}] {message}\n")
         self.log_area.configure(state='disabled')
         self.log_area.see(tk.END)
 
@@ -207,13 +235,14 @@ class App(ctk.CTk):
 
     def start_monitoring(self):
         def monitor():
-            handler = FileMonitor(self.log_message, lambda: self.monitoring_paused or not self.service_running)
+            handler = FileMonitor(self.log_message, lambda: self.monitoring_paused or not self.service_running, self.show_error_dialog)
             observer = Observer()
             # year = time.strftime("%Y", time.localtime())
             # month = time.strftime("%B", time.localtime())
             # day = time.strftime("%d", time.localtime())
             # path = f"C:/reports/local_qst/{year}/{month}/{day}/"
             # print(f"Monitoreando: {path}")
+            # observer.schedule(handler, path="C:/reports/local_qst/", recursive=True)
             observer.schedule(handler, path="C:/reports/local_qst/", recursive=True)
             observer.start()
             try:

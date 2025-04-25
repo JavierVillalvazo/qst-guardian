@@ -235,15 +235,22 @@ class App(ctk.CTk):
 
     def start_monitoring(self):
         def monitor():
+            year = time.strftime("%Y", time.localtime())
+            month = time.strftime("%B", time.localtime())
+            day = time.strftime("%d", time.localtime())
+            path = f"C:/reports/local_qst/{year}/{month}/{day}/"
+            print(f"Monitoreando: {path}")
+            # Verificar si la ruta existe, y crearla si no
+            if not os.path.exists(path):
+                try:
+                    os.makedirs(path, exist_ok=True)
+                except OSError as e:
+                    print(f"Error al crear la carpeta {path}: {e}")
+                    return
             handler = FileMonitor(self.log_message, lambda: self.monitoring_paused or not self.service_running, self.show_error_dialog)
             observer = Observer()
-            # year = time.strftime("%Y", time.localtime())
-            # month = time.strftime("%B", time.localtime())
-            # day = time.strftime("%d", time.localtime())
-            # path = f"C:/reports/local_qst/{year}/{month}/{day}/"
-            # print(f"Monitoreando: {path}")
+            observer.schedule(handler, path , recursive=True)
             # observer.schedule(handler, path="C:/reports/local_qst/", recursive=True)
-            observer.schedule(handler, path="C:/reports/local_qst/", recursive=True)
             observer.start()
             try:
                 while True:

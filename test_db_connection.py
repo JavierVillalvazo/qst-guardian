@@ -12,11 +12,11 @@ username = os.getenv("USERNAME")
 password = os.getenv("PASSWORD")
 
 # Mostrar los parámetros (sin imprimir la contraseña)
-print("🔍 Parámetros de conexión:")
+print("Parámetros de conexión:")
 print(f"SERVER: {server}")
 print(f"DATABASE: {database}")
 print(f"USERNAME: {username}")
-print("PASSWORD: ******")
+print("PASSWORD: ********")
 
 # Construir cadena de conexión
 con_str = (
@@ -38,8 +38,8 @@ try:
     cursor = conn.cursor()
     cursor.execute("SELECT GETDATE() AS CurrentDateTime")
     row = cursor.fetchone()
-    print(f"✅ Conexión exitosa. Fecha/hora actual del servidor: {row.CurrentDateTime}")
+    print(f"Conexión exitosa. Fecha/hora actual del servidor: {row.CurrentDateTime}")
     conn.close()
 except Exception as e:
-    print("❌ Error al conectar a la base de datos:")
+    print("Error al conectar a la base de datos:")
     print(e)

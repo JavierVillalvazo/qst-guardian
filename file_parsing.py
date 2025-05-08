@@ -4,7 +4,34 @@ from database import get_connection
 from datetime import datetime
 import shutil
 
-ERROR_FOLDER = "C:/reports/local_qst/errores/"
+
+
+def get_error_folder():
+    """return the dynamical path for the error folder
+        C:/reports/local_qst/errors/{year}/{month}/{day}/
+    """
+    ERROR_FOLDER = "C:/reports/local_qst/errors/"
+    today = datetime.today()
+    year = today.strftime("%Y")
+    month = today.strftime("%B")
+    day = today.strftime("%d")
+    
+    # Create the directory if it doesn't exist
+    error_folder_path = os.path.join(ERROR_FOLDER, year, month, day)
+    os.makedirs(error_folder_path, exist_ok=True)
+    
+    return error_folder_path
+
+def move_to_error_folder(file_path, log_callback, show_error_dialog):
+    error_folder_path = get_error_folder()
+    os.makedirs(error_folder_path, exist_ok=True) # Crea la carpeta si no existe
+    destination_path = os.path.join(error_folder_path, os.path.basename(file_path))
+    try:
+        shutil.move(file_path, destination_path)
+        log_callback(f"Archivo movido a {error_folder_path}")
+        show_error_dialog(os.path.basename(file_path), error_folder_path)
+    except Exception as move_error:
+        log_callback(f"Error al mover el archivo: {str(move_error)}")
 
 def parse_qst(file_path, log_callback, show_error_dialog):
     current_test_id = None
@@ -12,6 +39,7 @@ def parse_qst(file_path, log_callback, show_error_dialog):
     cursor = conn.cursor()
     inserted_tested_unit = False
     inserted_tested_unit_details = 0
+    processing_successful = False
     
     try:
         with open(file_path, 'r') as f:
@@ -84,24 +112,24 @@ def parse_qst(file_path, log_callback, show_error_dialog):
                     else:
                         log_callback(f"ERROR: Ha ocurrido un error con el archivo, reporte esto al técnico de pruebas'{os.path.basename(file_path)}'.")
         if inserted_tested_unit and node is not None and current_test_id is not None:
-            # log_callback(f"[{final_test_result}-Node:{node}] [TestID:{current_test_id}][{inserted_tested_unit_details} Tests] {os.path.basename(file_path)}")
-            #log_callback(f"Insertadas {inserted_tested_unit_details} mediciones en TestedUnitDetails para: {os.path.basename(file_path)}")
-            log_callback(f"[{final_test_result}-Node:{node}]{os.path.basename(file_path)}")
-        elif inserted_tested_unit:
-            log_callback(f"{final_test_result}: {os.path.basename(file_path)} - {inserted_tested_unit_details} tests registered.")
+            #log_callback(f"[NODE:{node}-{final_test_result}] Tests registered: {inserted_tested_unit_details} of 9 \n{os.path.basename(file_path)}")
+            log_callback(f"[NODE:{node}-{final_test_result}]- Registrado correctamente en DB \n{os.path.basename(file_path)}")
+            processing_successful = True
         else:
-            log_callback(f"ERROR: en def parse_qst(else block) {os.path.basename(file_path)}")
+            reason = []
+            if not inserted_tested_unit:
+                reason.append("inserted_tested_unit es False")
+            if node is None:
+                reason.append("node es None")
+            if current_test_id is None:
+                reason.append("current_test_id es None")
+            log_callback(f"ERROR: Fallo al registrar la unidad '{os.path.basename(file_path)}'. Razones: {', '.join(reason)}")
+            move_to_error_folder(file_path, log_callback, show_error_dialog)
     except Exception as e:
         #print(f"Error procesando archivo {file_path}: {str(e)}")       
         log_callback(f"Error al procesar {os.path.basename(file_path)}: {str(e)}")
-        try:
-            os.makedirs(ERROR_FOLDER, exist_ok=True) # Crea la carpeta si no existe
-            destination_path = os.path.join(ERROR_FOLDER, os.path.basename(file_path))
-            shutil.move(file_path, destination_path)
-            log_callback(f"Archivo movido a {ERROR_FOLDER}")
-            show_error_dialog(os.path.basename(file_path), ERROR_FOLDER)
-        except Exception as move_error:
-            log_callback(f"Error al mover el archivo: {str(move_error)}")
+        move_to_error_folder(file_path, log_callback, show_error_dialog)
     finally:
         cursor.close()
         conn.close()
+        return processing_successful 

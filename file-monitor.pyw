@@ -4,7 +4,9 @@ from tkinter import scrolledtext, messagebox
 import threading
 import time
 import os
+import sys
 from file_parsing import *
+from password_validate import PasswordDialog
 from pystray import Icon, MenuItem, Menu
 from PIL import Image
 from watchdog.observers import Observer
@@ -14,54 +16,126 @@ from watchdog.events import FileSystemEventHandler
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("dark-blue")
 
-ERROR_FOLDER = "C:/reports/local_qst/errores/"
+def is_running():
+    """Checks if an instance of the application is already running.
+    Uses a lock file to determine if another instance is active.
+    """
+    lock_path = "qst_monitor.lock"
+    try:
+        with open(lock_path, "x") as f:
+            return False
+    except FileExistsError:
+        return True
 
+def bring_to_front():
+    """Brings the existing window to the front if it exists."""
+    root = tk.Tk()
+    root.withdraw()  
+    try:
+        for window in root.winfo_children():
+            if window.winfo_toplevel().title() == "QST File Monitor":
+                window.winfo_toplevel().lift()
+                break
+    except Exception as e:
+        print(f"Error al intentar traer al frente: {e}")
+    finally:
+        root.destroy()
 
 class FileMonitor(FileSystemEventHandler):
-    def __init__(self, log_callback, is_paused, show_error_dialog):
+    """EventHandler for detecting file creation events in the monitored directory.
+
+    Attributes:
+        log_callback (callable): Function to send log messages to the application's log area.
+        is_paused (callable): Function that returns True if monitoring is paused, False otherwise.
+        show_error_dialog (callable): Function to display an error dialog to the user.
+        is_service_running (callable): Function that returns True if the monitoring service is active, False otherwise.
+    """
+    
+    def __init__(self, log_callback, is_paused, show_error_dialog_callback,is_service_running):
         self.log_callback = log_callback
         self.is_paused = is_paused
-        self.show_error_dialog = show_error_dialog
-    
-    def show_error_dialog(self, filename, error_folder):
-        messagebox.showerror(
-        "Error al procesar archivo",
-        f"El archivo '{filename}' no pudo ser procesado y fue movido a:\n{error_folder}"
-        )
+        self.show_error_dialog = show_error_dialog_callback
+        self.is_service_running = is_service_running # Recibe la función para verificar el estado del servicio
         
 
     def on_created(self, event):
+        if not self.is_service_running(): 
+            return 
+        if self.is_paused(): 
+            return
+        
         if not event.is_directory and event.src_path.endswith(".QST"):
             file_path = event.src_path
-            if ERROR_FOLDER not in file_path: # Ignora los archivos que ya están en la carpeta de errores
-                #self.log_callback(f"Archivo detectado: {os.path.basename(file_path)}")
+            error_folder_path = get_error_folder()
+            
+            if error_folder_path not in file_path: 
                 try:
-                    parse_qst(file_path, self.log_callback, self.show_error_dialog) 
-                    # Error: mostró como archivo procesado correctamente cuando mostroba error al procesar
-                    #self.log_callback(f"Procesado correctamente: {os.path.basename(file_path)}")
+                    processing_successful = parse_qst(file_path, self.log_callback, self.show_error_dialog)
+                    filename = os.path.basename(file_path)
+                    if processing_successful is not True:
+                        move_to_error_folder(file_path, self.log_callback, self.show_error_dialog_callback)
+                        self.show_message_dialog("Error al procesar archivo", error_message)
                 except Exception as e:
-                    self.log_callback(f"Error inesperado al procesar {os.path.basename(file_path)}: {str(e)}")
+                    error_message = f"Ocurrió un error inesperado al procesar el archivo '{os.path.basename(file_path)}':\n{str(e)}\nEl archivo fue movido a:\n{error_folder_path}"
+                    move_to_error_folder(file_path, lambda *args: None, self.show_error_dialog_callback)
+                    self.show_message_dialog("Error inesperado", error_message)
 
+import tkinter as tk
+import customtkinter as ctk
+
+class PasswordDialog(ctk.CTkToplevel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.title("Contraseña Requerida")
+        self.geometry("300x150")
+        self.resizable(False, False)
+        self.grab_set() 
+        self.focus()
+
+        self.password = tk.StringVar()
+        self.result = None
+
+        self._create_widgets()
+
+    def _create_widgets(self):
+        ctk.CTkLabel(self, text="Ingrese la contraseña:").pack(pady=10)
+        self.password_entry = ctk.CTkEntry(self, show="*", textvariable=self.password)
+        self.password_entry.pack(padx=20, pady=5)
+        self.password_entry.focus()
+        self.bind('<Return>', self._submit)
+
+        button_frame = ctk.CTkFrame(self, fg_color="transparent")
+        button_frame.pack(pady=15)
+
+        ctk.CTkButton(button_frame, text="Aceptar", command=self._submit).pack(side="left", padx=10)
+        ctk.CTkButton(button_frame, text="Cancelar", command=self.destroy).pack(side="right", padx=10)
+
+    def _submit(self, event=None):
+        self.result = self.password.get()
+        self.destroy()
+
+    def get_password(self):
+        self.wait_window()
+        return self.result
 
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("QST File Monitor")
-        #self.geometry("600x480")
         self.resizable(False, False)
         self.iconbitmap("qst_monitor.ico")
-        self.protocol("WM_DELETE_WINDOW", self.minimize_to_tray)
+        self.protocol("WM_DELETE_WINDOW", self.exit_app)
         #self.overrideredirect(True)
         self.attributes("-topmost", True)
-        self.attributes("-alpha", 0.95)
-        #self.attributes("-toolwindow", True)
-        # Position the window to the bottom-right corner of the screen
+        self.attributes("-alpha", 0.92)
+        window_width = 520
+        window_height = 500
+
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
-        window_width = 600
-        window_height = 780
-        x_position = screen_width - window_width - 10
-        y_position = screen_height - window_height - 10
+        
+        x_position = int((screen_width - window_width) / 2)
+        y_position = int((screen_height - window_height) / 2)
         self.geometry(f"{window_width}x{window_height}+{x_position}+{y_position}")
 
         self.service_running = True
@@ -78,20 +152,18 @@ class App(ctk.CTk):
         messagebox.showerror(
         "Error al procesar archivo",
         f"El archivo '{filename}' no pudo ser procesado y fue movido a:\n{error_folder}"
-        )  
+        )
+
+    def show_message_dialog(self, title, message):
+        messagebox.showerror(title, message)  
 
     def create_ui(self):
-        self.main_frame = ctk.CTkFrame(self, corner_radius=10)
-        self.main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        """Create the main UI components."""
+        #self.main_frame = ctk.CTkFrame(self, corner_radius=10)
+        #self.main_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-        self.header_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        self.header_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.header_frame.pack(fill="x", padx=10, pady=(10, 5))
-
-        ctk.CTkLabel(
-            self.header_frame,
-            text="QST FILE MONITOR",
-            font=ctk.CTkFont(size=16, weight="bold")
-        ).pack(side="left")
 
         self.status_indicator = ctk.CTkLabel(
             self.header_frame,
@@ -100,8 +172,16 @@ class App(ctk.CTk):
             font=self.bold_font
         )
         self.status_indicator.pack(side="right", padx=10)
+        
+        ctk.CTkLabel(
+            self.header_frame,
+            text="STATUS:",
+            text_color="white" if ctk.get_appearance_mode() == "Dark" else "black",
+            font=self.bold_font
+        ).pack(side="right", padx=5)
 
-        self.log_frame = ctk.CTkFrame(self.main_frame)
+
+        self.log_frame = ctk.CTkFrame(self)
         self.log_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
         self.log_area = scrolledtext.ScrolledText(
@@ -114,8 +194,8 @@ class App(ctk.CTk):
         )
         self.log_area.pack(fill="both", expand=True)
 
-        self.control_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        self.control_frame.pack(fill="x", padx=10, pady=(5, 10))
+        self.control_frame = ctk.CTkFrame(self, fg_color="transparent")
+        #self.control_frame.pack(fill="x", padx=10, pady=(5, 10))
 
         self.pause_btn = ctk.CTkButton(
             self.control_frame,
@@ -128,28 +208,31 @@ class App(ctk.CTk):
         self.pause_btn.pack(side="left", padx=5)
 
         self.clear_btn = ctk.CTkButton(
-            self.control_frame,
-            text="LIMPIAR",
+            self.header_frame,
+            text="LIMPIAR LOGS",
             width=100,
             command=self.clear_log,
             fg_color="#607D8B",
-            hover_color="#455A64"
+            hover_color="#455A64",
+            font=self.bold_font
         )
         self.clear_btn.pack(side="left", padx=5)
 
         ctk.CTkLabel(self.control_frame, text="", width=100).pack(side="left", expand=True)
 
         self.stop_btn = ctk.CTkButton(
-            self.control_frame,
+            self.header_frame,
             text="DETENER",
             width=100,
             command=self.toggle_service,
             fg_color="#F44336",
-            hover_color="#D32F2F"
+            hover_color="#D32F2F",
+            font=self.bold_font
         )
-        self.stop_btn.pack(side="right", padx=5)
+        self.stop_btn.pack(side="left", padx=5)
 
     def update_status_indicator(self):
+        """Update the status indicator based on the current state of the service."""
         if not self.service_running:
             text, color = "DETENIDO", "#F44336"
         elif self.monitoring_paused:
@@ -159,6 +242,7 @@ class App(ctk.CTk):
         self.status_indicator.configure(text=text, text_color=color)
 
     def toggle_pause(self):
+        """Toggle the monitoring pause state."""
         self.monitoring_paused = not self.monitoring_paused
         self.pause_btn.configure(text="REANUDAR" if self.monitoring_paused else "PAUSAR")
         self.update_status_indicator()
@@ -166,19 +250,51 @@ class App(ctk.CTk):
         self.update_tray()
 
     def toggle_service(self):
-        self.service_running = not self.service_running
-        self.stop_btn.configure(text="INICIAR" if not self.service_running else "DETENER")
+        """Toggle the monitoring service on or off."""
+        if self.service_running:
+            dialog = PasswordDialog(self)
+            password = dialog.get_password()
+            if password == "Qst2025#":
+                self._stop_service()
+            elif password is not None:
+                self.show_message_dialog("Contraseña Incorrecta", "La contraseña ingresada no es válida.")
+        else:
+            self._start_service()
+                
+    def _stop_service(self):
+        """Stop the monitoring service and update the UI accordingly."""
+        self.service_running = False
+        self.stop_btn.configure(text="INICIAR")
+        self.stop_btn.configure(text_color="#f3f3f3", fg_color="#4CAF50", hover_color="#388E3C")
         self.update_status_indicator()
-        self.log_message(f"Servicio {'detenido' if not self.service_running else 'iniciado'}")
+        self.log_message("Servicio detenido")
         self.update_tray()
+        if self.observer:
+            self.observer.stop()
+            self.observer.join()
+            self.observer = None
+    
+    def _start_service(self):
+        """Start the monitoring service and update the UI accordingly."""
+        self.service_running = True
+        self.stop_btn.configure(text="DETENER")
+        self.stop_btn.configure(text_color="#f3f3f3", fg_color="#F44336", hover_color="#D32F2F")
+        self.update_status_indicator()
+        self.log_message("Servicio iniciado")
+        self.update_tray()
+        self.start_monitoring()     
 
     def clear_log(self):
+        """Clear the log area."""
         self.log_area.configure(state='normal')
         self.log_area.delete(1.0, tk.END)
         self.log_area.configure(state='disabled')
         self.log_message("Logs limpiados")
 
     def log_message(self, message):
+        """Log a message to the log area with a timestamp.
+        Args: message (str): The message to log.
+        """
         timestamp = time.strftime("%H:%M:%S", time.localtime())
         formatted_message = f"[{timestamp}] {message}\n"
         self.log_area.configure(state='normal')
@@ -234,34 +350,73 @@ class App(ctk.CTk):
         )
 
     def start_monitoring(self):
+        self.log_message("Conectando a la base de datos...\n Espere un momento...")
+        self.observer = None  
+        
         def monitor():
-            year = time.strftime("%Y", time.localtime())
-            month = time.strftime("%B", time.localtime())
-            day = time.strftime("%d", time.localtime())
-            path = f"C:/reports/local_qst/{year}/{month}/{day}/"
-            print(f"Monitoreando: {path}")
-            # Verificar si la ruta existe, y crearla si no
-            if not os.path.exists(path):
-                try:
-                    os.makedirs(path, exist_ok=True)
-                except OSError as e:
-                    print(f"Error al crear la carpeta {path}: {e}")
-                    return
-            handler = FileMonitor(self.log_message, lambda: self.monitoring_paused or not self.service_running, self.show_error_dialog)
-            observer = Observer()
-            observer.schedule(handler, path , recursive=True)
-            # observer.schedule(handler, path="C:/reports/local_qst/", recursive=True)
-            observer.start()
+            db_connection = get_connection()
+            if db_connection is None:
+                self.log_message("Error al obtener la conexión a la base de datos")
+                self.show_message_dialog("Error de conexión", "No se pudo conectar a la base de datos. Verifica la configuración.")
+                self._stop_service()
+                return
             try:
-                while True:
-                    time.sleep(1)
-            finally:
-                observer.stop()
-                observer.join()
+                is_closed = False
+                if hasattr(db_connection, 'closed'):
+                    is_closed = db_connection.closed
+                elif hasattr(db_connection, 'is_closed'):
+                    is_closed = db_connection.is_closed()
 
+                if is_closed:
+                    self.log_message("La conexión a la base de datos está cerrada")
+                    self.show_message_dialog("Error de conexión", "La conexión a la base de datos está cerrada.")
+                    self._stop_service()
+                    return
+                else:
+                    year = time.strftime("%Y", time.localtime())
+                    month = time.strftime("%B", time.localtime())
+                    day = time.strftime("%d", time.localtime())
+                    path = f"C:/reports/local_qst/{year}/{month}/{day}/"
+                    # Verificar si la ruta existe, y crearla si no
+                    if not os.path.exists(path):
+                        try:
+                            os.makedirs(path, exist_ok=True)
+                        except OSError as e:
+                            print(f"Error al crear la carpeta {path}: {e}")
+                            self.show_message_dialog("Error", f"No se pudo crear la carpeta de monitoreo: {path}")
+                            return
+                    print(f"Monitoreando: {path}")
+                    messagebox.showinfo("Conexión Exitosa", "La conexión a la base de datos se estableció correctamente.", icon="info")
+                    self.log_message(f"Conexión a la base de datos establecida ")
+                    self.log_message("Cargando configuración............")
+                    self.log_message("Monitoreando: " + path)
+                    self.log_message("Esperando resultados de pruebas...")
+                    handler = FileMonitor(self.log_message, lambda: self.monitoring_paused or not self.service_running, self.show_error_dialog, lambda: self.service_running)
+                    observer = Observer()
+                    observer.schedule(handler, path , recursive=True)
+                    observer.start()
+                    self.observer = observer  
+                    try:
+                        while True:
+                            time.sleep(1)
+                    finally:
+                        observer.stop()
+                        observer.join()
+            except Exception as e:
+                self.log_message(f"Error al verificar o iniciar el monitoreo: {e}")
+                self.show_message_dialog("Error", f"Ocurrió un error al iniciar el monitoreo: {e}")
+                self._stop_service()
         threading.Thread(target=monitor, daemon=True).start()
 
-
 if __name__ == "__main__":
-    app = App()
-    app.mainloop()
+    if is_running():
+        messagebox.showinfo("QST File Monitor", "La aplicación ya se está ejecutando.")
+        bring_to_front()
+        sys.exit()
+    else:
+        app = App()
+        app.mainloop()
+    try:
+        os.remove("qst_monitor.lock")
+    except FileNotFoundError:
+        pass

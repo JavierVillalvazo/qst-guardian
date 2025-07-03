@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 import pyodbc
 
-# Cargar las variables desde el archivo .env
+# loading environment variables from .env file
 load_dotenv()
 
 server = os.getenv("SERVER")
@@ -26,6 +26,7 @@ def get_connection():
         # print(f"Server: {server}, Database: {database}, Username: {username}")
         return conn
     except pyodbc.OperationalError as e:
+        # Error connection to database in get_connection()
         print(f"Error al conectar a la base de datos en get_connection(): {e}") # Para depuración en la terminal
         return None
     except Exception as e:

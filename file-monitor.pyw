@@ -80,9 +80,6 @@ class FileMonitor(FileSystemEventHandler):
                     move_to_error_folder(file_path, lambda *args: None, self.show_error_dialog_callback)
                     self.show_message_dialog("Error inesperado", error_message)
 
-import tkinter as tk
-import customtkinter as ctk
-
 class PasswordDialog(ctk.CTkToplevel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

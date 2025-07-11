@@ -6,7 +6,6 @@ import time
 import os
 import sys
 from file_parsing import *
-from password_validate import PasswordDialog
 from pystray import Icon, MenuItem, Menu
 from PIL import Image
 from watchdog.observers import Observer
@@ -23,23 +22,24 @@ def is_running():
     lock_path = "qst_monitor.lock"
     try:
         with open(lock_path, "x") as f:
-            return False
+            f.write(str(os.getpid()))    
+        return False
     except FileExistsError:
         return True
 
-def bring_to_front():
-    """Brings the existing window to the front if it exists."""
-    root = tk.Tk()
-    root.withdraw()  
-    try:
-        for window in root.winfo_children():
-            if window.winfo_toplevel().title() == "QST File Monitor":
-                window.winfo_toplevel().lift()
-                break
-    except Exception as e:
-        print(f"Error al intentar traer al frente: {e}")
-    finally:
-        root.destroy()
+# def bring_to_front():
+#     """Brings the existing window to the front if it exists."""
+#     root = tk.Tk()
+#     root.withdraw()  
+#     try:
+#         for window in root.winfo_children():
+#             if window.winfo_toplevel().title() == "QST File Monitor":
+#                 window.winfo_toplevel().lift()
+#                 break
+#     except Exception as e:
+#         print(f"Error al intentar traer al frente: {e}")
+#     finally:
+#         root.destroy()
 
 class FileMonitor(FileSystemEventHandler):
     """EventHandler for detecting file creation events in the monitored directory.
@@ -59,20 +59,24 @@ class FileMonitor(FileSystemEventHandler):
         
 
     def on_created(self, event):
-        if not self.is_service_running(): 
+        if not self.is_service_running() or self.is_paused(): 
             return 
-        if self.is_paused(): 
-            return
         
-        if not event.is_directory and event.src_path.endswith(".QST"):
+        if not event.is_directory and event.src_path.lower().endswith(".qst"): # Convertir a minúsculas para robustez
             file_path = event.src_path
             error_folder_path = get_error_folder()
+            
+            if error_folder_path.lower() in file_path.lower(): # Comprobar si ya está en una carpeta de errores
+                # Si el archivo se detecta en la carpeta de errores, lo ignoramos.
+                return
+            
             
             if error_folder_path not in file_path: 
                 try:
                     processing_successful = parse_qst(file_path, self.log_callback, self.show_error_dialog)
                     filename = os.path.basename(file_path)
                     if processing_successful is not True:
+                        error_message = f"El archivo '{filename}' no pudo ser procesado correctamente y fue movido a la carpeta de errores."
                         move_to_error_folder(file_path, self.log_callback, self.show_error_dialog_callback)
                         self.show_message_dialog("Error al procesar archivo", error_message)
                 except Exception as e:
@@ -127,7 +131,7 @@ class App(ctk.CTk):
         self.attributes("-alpha", 0.92)
         window_width = 520
         window_height = 500
-
+        
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
         
@@ -204,16 +208,16 @@ class App(ctk.CTk):
         )
         self.pause_btn.pack(side="left", padx=5)
 
-        self.clear_btn = ctk.CTkButton(
-            self.header_frame,
-            text="LIMPIAR LOGS",
-            width=100,
-            command=self.clear_log,
-            fg_color="#607D8B",
-            hover_color="#455A64",
-            font=self.bold_font
-        )
-        self.clear_btn.pack(side="left", padx=5)
+        # self.clear_btn = ctk.CTkButton(
+        #     self.header_frame,
+        #     text="LIMPIAR LOGS",
+        #     width=100,
+        #     command=self.clear_log,
+        #     fg_color="#607D8B",
+        #     hover_color="#455A64",
+        #     font=self.bold_font
+        # )
+        # self.clear_btn.pack(side="left", padx=5)
 
         ctk.CTkLabel(self.control_frame, text="", width=100).pack(side="left", expand=True)
 
@@ -345,18 +349,25 @@ class App(ctk.CTk):
             #MenuItem("Cambiar ruta", )
             MenuItem("Salir", self.exit_app)
         )
+        
+    def get_monitoring_path(self):
+        """Return the path where the QST files are monitored."""
+        year = time.strftime("%Y", time.localtime())
+        month = time.strftime("%B", time.localtime())
+        day = time.strftime("%d", time.localtime())
+        return f"C:/reports/local_qst/{year}/{month}/{day}/"
 
     def start_monitoring(self):
-        self.log_message("Conectando a la base de datos...\n Espere un momento...")
+        self.log_message("Conectando a la base de datos...")
         self.observer = None  
         
         def monitor():
             db_connection = get_connection()
             if db_connection is None:
-                self.log_message("Error al obtener la conexión a la base de datos")
-                self.show_message_dialog("Error de conexión", "No se pudo conectar a la base de datos. Verifica la configuración.")
+                self.after(0, lambda: self.show_message_dialog("Error de conexión", "No se pudo conectar a la base de datos."))
                 self._stop_service()
                 return
+        
             try:
                 is_closed = False
                 if hasattr(db_connection, 'closed'):
@@ -365,15 +376,14 @@ class App(ctk.CTk):
                     is_closed = db_connection.is_closed()
 
                 if is_closed:
-                    self.log_message("La conexión a la base de datos está cerrada")
-                    self.show_message_dialog("Error de conexión", "La conexión a la base de datos está cerrada.")
+                    self.log_message("La conexión a la base de datos está cerrada.")
                     self._stop_service()
-                    return
+                    return  
                 else:
-                    year = time.strftime("%Y", time.localtime())
-                    month = time.strftime("%B", time.localtime())
-                    day = time.strftime("%d", time.localtime())
-                    path = f"C:/reports/local_qst/{year}/{month}/{day}/"
+                    # year = time.strftime("%Y", time.localtime())
+                    # month = time.strftime("%B", time.localtime())
+                    # day = time.strftime("%d", time.localtime())
+                    path = self.get_monitoring_path()
                     # Verificar si la ruta existe, y crearla si no
                     if not os.path.exists(path):
                         try:
@@ -386,7 +396,7 @@ class App(ctk.CTk):
                     messagebox.showinfo("Conexión Exitosa", "La conexión a la base de datos se estableció correctamente.", icon="info")
                     self.log_message(f"Conexión a la base de datos establecida ")
                     self.log_message("Cargando configuración............")
-                    self.log_message("Monitoreando: " + path)
+                    self.log_message(f"Monitoreando: {path}")
                     self.log_message("Esperando resultados de pruebas...")
                     handler = FileMonitor(self.log_message, lambda: self.monitoring_paused or not self.service_running, self.show_error_dialog, lambda: self.service_running)
                     observer = Observer()
@@ -408,7 +418,7 @@ class App(ctk.CTk):
 if __name__ == "__main__":
     if is_running():
         messagebox.showinfo("QST File Monitor", "La aplicación ya se está ejecutando.")
-        bring_to_front()
+        # bring_to_front()
         sys.exit()
     else:
         app = App()

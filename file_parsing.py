@@ -1,6 +1,6 @@
 import re
 import os
-from database import get_connection
+from database_oracle import get_connection
 from datetime import datetime
 import shutil
 
@@ -29,7 +29,11 @@ def move_to_error_folder(file_path, log_callback, show_error_dialog):
     try:
         shutil.move(file_path, destination_path)
         log_callback(f"Archivo movido a {error_folder_path}")
-        show_error_dialog(os.path.basename(file_path), error_folder_path)
+        show_error_dialog(os.path.basename(file_path), error_folder_path+"\n PORFAVOR: Reporte este error al técnico de pruebas")
+    except FileNotFoundError:
+        log_callback(f"ERROR: El archivo '{file_path}' no se encontró para mover a la carpeta de errores.")
+    except PermissionError:
+        log_callback(f"ERROR: Permiso denegado al intentar mover '{file_path}'. Asegúrate de que no esté en uso.")
     except Exception as move_error:
         log_callback(f"Error al mover el archivo: {str(move_error)}")
 
@@ -61,18 +65,28 @@ def parse_qst(file_path, log_callback, show_error_dialog):
                     #equipment_name = parts[10]}
                     #assembly_revision = parts[-1]
 
-                    cursor.execute("""
-                        INSERT INTO TestedUnits (
-                            SerialNumber, CustomerModel, InternalModel, TestDate, Node, Operator, ProgramName, ProgramVersion,
-                            TestDuration, TestResult
-                        ) 
-                        OUTPUT INSERTED.TestedUnitID
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, serial_number, customer_model, internal_model, test_date, node, operator, 
-                        program_name, program_version, test_duration, test_result)
+                    tested_unit_id = cursor.var(int)
 
-                    row = cursor.fetchone()
-                    current_test_id = row[0] if row else None
+                    cursor.execute("""
+                        BEGIN
+                            INSERT INTO Tested_Units (
+                                SERIAL_NUMBER, CUSTOMER_MODEL, INTERNAL_MODEL, TEST_DATE, NODE, OPERATOR, PROGRAM_NAME, PROGRAM_VERSION,
+                                TEST_DURATION, TEST_RESULT
+                            ) 
+                            VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10)
+                            RETURNING TESTED_UNIT_ID INTO :11;
+                        END;
+                    """, [
+                        serial_number, customer_model, internal_model, test_date, node, operator, 
+                        program_name, program_version, test_duration, test_result,
+                        tested_unit_id
+                    ])
+
+                    current_test_id = tested_unit_id.getvalue()
+
+
+                    # row = cursor.fetchone()
+                    # current_test_id = row[0] if row else None
 
                     if current_test_id is not None:
                         conn.commit()
@@ -93,13 +107,16 @@ def parse_qst(file_path, log_callback, show_error_dialog):
                     
                     if test_measurement_value is not None and current_test_id is not None:
                         cursor.execute("""
-                        INSERT INTO TestedUnitDetails (
-                            TestedUnitID, TestName, TestMeasurement, MeasurementUnit, 
-                            LowLimit, HighLimit, TestResult
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """, current_test_id, test_name, test_measurement_value, unit, 
-                        low_limit, high_limit, test_result)
+                            INSERT INTO Tested_Unit_Details (
+                                TESTED_UNIT_ID, TEST_NAME, TEST_MEASUREMENT, MEASUREMENT_UNIT, 
+                                LOW_LIMIT, HIGHT_LIMIT, TEST_RESULT
+                            )
+                            VALUES (:1, :2, :3, :4, :5, :6, :7)
+                        """, [
+                            current_test_id, test_name, test_measurement_value, unit, 
+                            low_limit, high_limit, test_result
+                        ])
+
                         conn.commit()
                         inserted_tested_unit_details += cursor.rowcount
                         if test_result == "FAIL":
